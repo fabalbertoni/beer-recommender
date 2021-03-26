@@ -4,3 +4,8 @@ networkx
 tensorflow
 altair
 seaborn
+black==20.8b1
+mypy
+numpy
+torch==1.8.0
+sklearn
