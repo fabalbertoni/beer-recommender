@@ -1,19 +1,37 @@
 # %%
 
 # Imports and paths
+import pickle
 import typing as T
-import pandas as pd
-import numpy as np
-import altair as alt
-import networkx as nx
+from functools import wraps
+from time import time
 from enum import Enum
 from IPython.display import display
 
+import altair as alt
+import matplotlib.pyplot as plt
+import networkx as nx
+import numpy as np
+import pandas as pd
+import scipy
+import seaborn as sns
 
 # Same directory structure as the shared Google Drive folder
 DATA_ROOT = "data/"
 BEER_ADVOCATE_PATH = f"{DATA_ROOT}BeerAdvocate/"
 BEER_ADVOCATE_CSV = f"{BEER_ADVOCATE_PATH}beer_reviews.csv"
+
+
+def timing(f):
+    @wraps(f)
+    def wrap(*args, **kw):
+        ts = time()
+        result = f(*args, **kw)
+        te = time()
+        print(f"func:{f.__name__} args:[{args}, {kw}] took: {(te-ts):2.4f} sec")
+        return result
+
+    return wrap
 
 
 def load_and_preprocess_beeradvocate_df():
@@ -138,6 +156,7 @@ def train_test_val(
     return split_train.copy(), split_val.copy(), split_test.copy()
 
 
+@timing
 def make_corr_graph(df_review: pd.DataFrame, rating_column: str) -> nx.Graph:
     def _keep_beer(dfb):
         return len(dfb) >= 20
@@ -165,7 +184,7 @@ output_names = {
 }
 
 # Here we can recompute the splits, or load them from files.
-recompute_splits = True
+recompute_splits = False
 
 if recompute_splits:
 
@@ -181,15 +200,53 @@ else:
     )
 
 # %%
-recompute_corrs = True
+recompute_corrs = False
 if recompute_corrs:
     df_corr = make_corr_graph(train_df, "review_overall")
 else:
     df_corr = pd.read_csv(
-        f"{BEER_ADVOCATE_PATH}corr_matrix.csv",
+        f"{BEER_ADVOCATE_PATH}df_corr.csv",
         dtype={"beer_beerid": str},
     ).set_index("beer_beerid")
 
+# %%
+
+# Set NaNs to zeros, and keep only most ranked
+df_corr.fillna(0, inplace=True)
+
+# For each beer, keep only the top 500 most correlated ones.
+df_corr.mask(
+    df_corr.rank(axis="columns", method="min", ascending=False) < 500, 0, inplace=True
+)
 
 # %%
-G = nx.from_pandas_adjacency(df_corr, create_using=nx.Graph)
+recompute_G = False
+if recompute_G:
+    G = nx.from_pandas_adjacency(df_corr, create_using=nx.Graph)
+    with open(f"{BEER_ADVOCATE_PATH}G_df_corr.pkl", "wb") as f:
+        pickle.dump(G, f)
+else:
+    with open(f"{BEER_ADVOCATE_PATH}G_df_corr.pkl", "rb") as f:
+        G = pickle.load(f)
+
+# %%
+
+#
+
+Gcc = sorted(nx.connected_components(G), key=len, reverse=True)
+Gcc0 = G.subgraph(Gcc[0])
+
+W = nx.to_numpy_array(Gcc0)
+
+np.fill_diagonal(W, 0)
+(w, v) = scipy.sparse.linalg.eigs(W, k=1, which="LM")
+Wnorm = W / np.abs(w[0])
+
+# %%
+
+# This fills up the RAM :/
+plt.figure(figsize=(10, 10))
+sns.heatmap(Wnorm, cmap="Greys")
+
+
+# %%
