@@ -98,7 +98,16 @@ def make_user_rating_matrix(
 
 
 @timing
-def train_val_test(df_user_rating: pd.DataFrame) -> pd.DataFrame:
+def train_val_test(
+    df_user_rating: pd.DataFrame, recompute: bool = False
+) -> pd.DataFrame:
+    if not recompute:
+        return (
+            pd.read_csv(f"{BEER_ADVOCATE_PATH}df_user_rating_train.csv"),
+            pd.read_csv(f"{BEER_ADVOCATE_PATH}df_user_rating_val.csv"),
+            pd.read_csv(f"{BEER_ADVOCATE_PATH}df_user_rating_test.csv"),
+        )
+
     split_train_val_proportions = (0.8, 0.1)
 
     indexes_arr = np.arange(len(df_user_rating))
@@ -119,7 +128,13 @@ def make_df_corr(
     rating_column: str,
     most_correlated: int = 80,
     min_ratings: int = 20,
+    recompute: bool = False,
 ) -> T.Tuple[pd.DataFrame, nx.Graph, np.ndarray]:
+
+    if not recompute:
+        print("Loading persisted df_corr..")
+        df_corr = pd.read_csv(f"{BEER_ADVOCATE_PATH}df_corr.csv")
+        return df_corr
 
     df_corr = df_user_rating.corr(min_periods=min_ratings)
 
