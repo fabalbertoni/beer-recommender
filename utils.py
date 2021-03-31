@@ -1,6 +1,9 @@
 import networkx as nx
+import numpy as np
 
-from itertools import combinations
+from itertools import permutations
+
+from sklearn.preprocessing import LabelEncoder
 
 
 def build_graph(
@@ -79,7 +82,7 @@ def build_graph(
 
         edges = []
         for styles, nodes in styles_dict.items():
-            edges.extend(list(combinations(nodes, 2)))
+            edges.extend(list(permutations(nodes, 2)))
             styles_edges_len = len(edges)
         if debug:
             print(
@@ -87,7 +90,7 @@ def build_graph(
             )
 
         for brewery, nodes in brewery_dict.items():
-            edges.extend(list(combinations(nodes, 2)))
+            edges.extend(list(permutations(nodes, 2)))
             brewery_edges_len = len(edges) - styles_edges_len
         if debug:
             print(
@@ -99,11 +102,123 @@ def build_graph(
     return graph
 
 
+def decompose_graph(graph, split_ratio=.8):
+    # TODO Instead of thecking str or int, build the initial mask for the graph and use it.
+    # Transform user ids in the graph, then avoid calling transform a lot of times.
+
+    print('1')
+    le_users = LabelEncoder()
+    le_items = LabelEncoder()
+
+    le_users.fit([user for user in graph.nodes() if isinstance(user, str)])
+    le_items.fit([item for item in graph.nodes() if isinstance(item, int)])
+
+    print('2')
+
+    history_u_lists = {
+        user:
+        [
+            item for item in graph.successors(user) if isinstance(item, int)
+        ]
+        for user in graph.nodes() if isinstance(user, str)
+    }
+
+    history_ur_lists = {
+        user:
+        [
+            list(graph.get_edge_data(user, item).values()) for item in graph.successors(user)
+            if isinstance(item, int)
+        ]
+        for user in graph.nodes() if isinstance(user, str)
+    }
+
+    # assert len(history_v_lists['fodeeoz']) == len(history_vr_lists['fodeeoz'])
+
+    history_v_lists = {
+        item:
+        [
+            user for user in graph.predecessors(item) if isinstance(user, str)
+        ]
+        for item in graph.nodes() if isinstance(item, int)
+    }
+
+    history_vr_lists = {
+        item:
+        [
+            list(graph.get_edge_data(user, item).values()) for user in graph.predecessors(item)
+            if isinstance(user, str)
+        ]
+        for item in graph.nodes() if isinstance(item, int)
+    }
+
+    # assert len(history_u_lists[681]) == len(history_ur_lists[681])
+
+    split_data = np.array(
+        [
+            [user, item, list(graph.get_edge_data(user, item).values())]
+            for user, item in graph.edges()
+            if isinstance(user, str) and isinstance(item, int)
+        ]
+    )
+
+    u, v, r = np.split(split_data, 3, axis=1)
+    assert len(u) == len(v) == len(r)
+
+    print('6')
+
+    u, v, r = list(v), list(u), list(r)
+
+    u = le_users.transform(v)
+    v = le_items.transform(u)
+
+    history_u_lists = {
+        le_users.transform([user])[0]: le_items.transform(items)
+        for user, items in history_u_lists.items()
+    }
+
+    history_ur_lists = {
+        le_users.transform([user])[0]: ratings
+        for user, ratings in history_ur_lists.items()
+    }
+
+    history_v_lists = {
+        le_items.transform([item])[0]: le_users.transform(users)
+        for item, users in history_v_lists.items()
+    }
+
+    history_vr_lists = {
+        le_items.transform([item])[0]: ratings
+        for item, ratings in history_vr_lists.items()
+    }
+
+    print('Done transforming. ')
+
+    N = len(u)
+
+    train_u = u[:int(N * split_ratio)]
+    train_v = v[:int(N * split_ratio)]
+    train_r = r[:int(N * split_ratio)]
+
+    test_u = u[int(N * split_ratio):]
+    test_v = v[int(N * split_ratio):]
+    test_r = r[int(N * split_ratio):]
+
+    print('7')
+
+    item_adj_lists = {le_items.transform([item])[0]: le_items.transform(list(set(graph.neighbors(item)))) for item in graph.nodes() if isinstance(item, int)}
+
+    assert len(history_u_lists) == len(history_ur_lists)
+    assert len(history_v_lists) == len(history_vr_lists)
+
+    return (history_u_lists, history_ur_lists, history_v_lists, history_vr_lists, train_u, train_v,
+            train_r, test_u, test_v, test_r, item_adj_lists)
+
+
 def get_beers_mask(graph):
     return [isinstance(node, int) for node in list(graph.nodes())]
 
 
-def get_user_idxs(graph):
+def get_user_mask(graph):
     return [isinstance(node, str) for node in list(graph.nodes())]
 
 
