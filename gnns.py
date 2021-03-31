@@ -1,6 +1,6 @@
 # %%
 
-# Imports and paths
+# Imports, paths and functions
 import pickle
 import typing as T
 from functools import wraps
@@ -102,10 +102,17 @@ def train_val_test(
     df_user_rating: pd.DataFrame, recompute: bool = False
 ) -> pd.DataFrame:
     if not recompute:
+        print("Loading persisted train, val, test sets..")
         return (
-            pd.read_csv(f"{BEER_ADVOCATE_PATH}df_user_rating_train.csv"),
-            pd.read_csv(f"{BEER_ADVOCATE_PATH}df_user_rating_val.csv"),
-            pd.read_csv(f"{BEER_ADVOCATE_PATH}df_user_rating_test.csv"),
+            pd.read_csv(
+                f"{BEER_ADVOCATE_PATH}df_user_rating_train.csv",
+            ).set_index("review_profilename"),
+            pd.read_csv(
+                f"{BEER_ADVOCATE_PATH}df_user_rating_val.csv",
+            ).set_index("review_profilename"),
+            pd.read_csv(
+                f"{BEER_ADVOCATE_PATH}df_user_rating_test.csv",
+            ).set_index("review_profilename"),
         )
 
     split_train_val_proportions = (0.8, 0.1)
@@ -134,6 +141,10 @@ def make_df_corr(
     if not recompute:
         print("Loading persisted df_corr..")
         df_corr = pd.read_csv(f"{BEER_ADVOCATE_PATH}df_corr.csv")
+
+        # So the columns and the index match.
+        df_corr["beer_beerid"] = df_corr["beer_beerid"].astype(str)
+        df_corr = df_corr.set_index("beer_beerid")
         return df_corr
 
     df_corr = df_user_rating.corr(min_periods=min_ratings)
@@ -167,6 +178,9 @@ def make_graph(df_corr: pd.DataFrame) -> T.Tuple[nx.Graph, np.ndarray]:
     return Gcc0, Wnorm
 
 
+# %% [markdown]
+
+## Procesamos los datos en un DataFrame de correlación y un grafo asociado
 # %%
 
 # Load and split in entities
@@ -187,3 +201,137 @@ df_user_rating_train, df_user_rating_val, df_user_rating_test = train_val_test(
 df_corr = make_df_corr(df_user_rating_train, rating_column)
 
 G, Wnorm = make_graph(df_corr)
+
+# %% [markdown]
+
+## Armamos un training, validation y test set
+### Enfoque 1: Predecir rating para una cerveza sola.
+
+# Random beer we want to train the GNN for.
+the_beer = "6322"
+
+
+def adjust_dfs_to_graph(
+    df_train: pd.DataFrame,
+    df_val: pd.DataFrame,
+    df_test: pd.DataFrame,
+    G: nx.Graph,
+    items_to_predict: T.List[str],
+) -> T.Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+
+    if len(items_to_predict) != 1:
+        raise NotImplementedError("For now we're supporting prediction of one item")
+
+    item_to_predict = items_to_predict[0]
+
+    nodes_in_graph = list(G.nodes())
+
+    # We remove the users' rows who didn't rate `the_beer`
+    df_train_adjusted = df_user_rating_train.dropna(subset=[the_beer], axis="rows")
+    df_val_adjusted = df_user_rating_val.dropna(subset=[the_beer], axis="rows")
+    df_test_adjusted = df_user_rating_test.dropna(subset=[the_beer], axis="rows")
+
+    # We remove those beers which were left out of the graph G
+    beers_in_G = list(G.nodes())
+    df_train_adjusted = df_train_adjusted[beers_in_G]
+    df_val_adjusted = df_val_adjusted[beers_in_G]
+    df_test_adjusted = df_test_adjusted[beers_in_G]
+
+    return (df_train_adjusted, df_val_adjusted, df_test_adjusted)
+
+
+def get_X_y(
+    df: pd.DataFrame, W: np.ndarray, items_to_predict: T.List[str]
+) -> T.Tuple[np.ndarray, np.ndarray]:
+    if len(items_to_predict) != 1:
+        raise NotImplementedError(
+            "We do not support more than one element to predict yet."
+        )
+
+    the_item = items_to_predict[0]
+
+    df_user_rating = df.copy()
+
+    # `X` will have zeros for the beer, since we want to predict those values
+    # We'll put them in `y`.
+    the_item_rating = df_user_rating[the_item]
+    df_user_rating[the_item] = 0
+
+    X = (
+        df_user_rating.fillna(0).to_numpy()  # We get rid of NaNs here
+        # Here we convert each user's ratings into a 1xnumberOfNodex matrix
+        # We might have more than 1 dimension later.
+        .reshape((len(df_user_rating), 1, W.shape[0]))
+    )
+
+    # We put back the target item's rating, to assemble `y`
+    df_user_rating[:] = 0
+    df_user_rating[the_item] = the_item_rating
+
+    y = (
+        df_user_rating.fillna(0)
+        .to_numpy()
+        .reshape((len(df_user_rating), 1, W.shape[0]))
+    )
+
+    return X, y
+
+
+# %%
+
+# We remove the users' rows who didn't rate `the_beer`
+df_user_rating_train, df_user_rating_val, df_user_rating_test = adjust_dfs_to_graph(
+    df_user_rating_train, df_user_rating_val, df_user_rating_test, G, [the_beer]
+)
+
+# %%
+
+recompute_X_y = False
+if recompute_X_y:
+    X_train, y_train = get_X_y(df_user_rating_train, Wnorm, [the_beer])
+    X_val, y_val = get_X_y(df_user_rating_val, Wnorm, [the_beer])
+    X_test, y_test = get_X_y(df_user_rating_test, Wnorm, [the_beer])
+
+    with open(f"{BEER_ADVOCATE_PATH}X_train.npy", "wb") as f:
+        np.save(f, X_train)
+
+    with open(f"{BEER_ADVOCATE_PATH}y_train.npy", "wb") as f:
+        np.save(f, y_train)
+
+    with open(f"{BEER_ADVOCATE_PATH}X_val.npy", "wb") as f:
+        np.save(f, X_val)
+
+    with open(f"{BEER_ADVOCATE_PATH}y_val.npy", "wb") as f:
+        np.save(f, y_val)
+
+    with open(f"{BEER_ADVOCATE_PATH}X_test.npy", "wb") as f:
+        np.save(f, X_test)
+
+    with open(f"{BEER_ADVOCATE_PATH}y_test.npy", "wb") as f:
+        np.save(f, y_test)
+
+else:
+    with open(f"{BEER_ADVOCATE_PATH}X_train.npy", "rb") as f:
+        X_train = np.load(f)
+
+    with open(f"{BEER_ADVOCATE_PATH}y_train.npy", "rb") as f:
+        y_train = np.load(f)
+
+    with open(f"{BEER_ADVOCATE_PATH}X_val.npy", "rb") as f:
+        X_val = np.load(f)
+
+    with open(f"{BEER_ADVOCATE_PATH}y_val.npy", "rb") as f:
+        y_val = np.load(f)
+
+    with open(f"{BEER_ADVOCATE_PATH}X_test.npy", "rb") as f:
+        X_test = np.load(f)
+
+    with open(f"{BEER_ADVOCATE_PATH}y_test.npy", "rb") as f:
+        y_test = np.load(f)
+
+print(f"Train shapes: {X_train.shape}; {y_train.shape}")
+print(f"Val shapes: {X_val.shape}; {y_val.shape}")
+print(f"Test shapes: {X_test.shape}; {y_test.shape}")
+
+
+# %%
