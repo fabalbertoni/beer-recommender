@@ -168,8 +168,8 @@ def decompose_graph(graph, split_ratio=.8):
 
     u, v, r = list(v), list(u), list(r)
 
-    u = le_users.transform(v)
-    v = le_items.transform(u)
+    u = le_users.transform(u)
+    v = le_items.transform(v)
 
     history_u_lists = {
         le_users.transform([user])[0]: le_items.transform(items)
