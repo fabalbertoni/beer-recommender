@@ -43,7 +43,7 @@ class UV_Aggregator(nn.Module):
                 uv_rep = self.v2e.weight[nodes[i]]
 
             # e_r = self.r2e.weight[tmp_label]
-            e_r = self.r2e.forward(torch.FloatTensor(tmp_label))
+            e_r = self.r2e.forward(torch.FloatTensor(tmp_label).to(self.device))
             x = torch.cat((e_uv, e_r), 1)
             x = F.relu(self.w_r1(x))
             o_history = F.relu(self.w_r2(x))

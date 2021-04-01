@@ -114,10 +114,12 @@ def test(model, device, test_loader):
             val_output = model.forward(test_u, test_v)
             tmp_pred.append(list(val_output.data.cpu().numpy()))
             target.append(list(tmp_target.data.cpu().numpy()))
+
     tmp_pred = np.array(sum(tmp_pred, []))
     target = np.array(sum(target, []))
+    # TODO: Same as above, not sure we we have an extra dim.
+    target = np.squeeze(target)
     expected_rmse = sqrt(mean_squared_error(tmp_pred, target))
-    import pdb; pdb.set_trace()
     mae = mean_absolute_error(tmp_pred, target)
     return expected_rmse, mae
 
@@ -168,7 +170,7 @@ def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epoc
         nn.Linear(5, 200),
         nn.ReLU(),
         nn.Linear(200, embed_dim),
-    )
+    ).to(device)
 
     # user feature
     # features: item * rating

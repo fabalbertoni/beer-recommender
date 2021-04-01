@@ -166,7 +166,7 @@ def decompose_graph(graph, split_ratio=.8):
 
     print('6')
 
-    u, v, r = list(v), list(u), list(r)
+    u, v, r = list(u), list(v), list(r)
 
     u = le_users.transform(u)
     v = le_items.transform(v)
