@@ -9,3 +9,5 @@ mypy
 numpy
 torch==1.8.0
 sklearn
+alegnn
+hdf5storage
