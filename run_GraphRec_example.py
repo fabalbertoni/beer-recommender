@@ -119,9 +119,9 @@ def test(model, device, test_loader):
     target = np.array(sum(target, []))
     # TODO: Same as above, not sure we we have an extra dim.
     target = np.squeeze(target)
-    expected_rmse = sqrt(mean_squared_error(tmp_pred, target))
-    mae = mean_absolute_error(tmp_pred, target)
-    return expected_rmse, mae
+    expected_rmses = [sqrt(mean_squared_error(tmp_pred[:, i], target[:, i])) for i in range(target.shape[1])]
+    maes = [mean_absolute_error(tmp_pred[:, i], target[:, i]) for i in range(target.shape[1])]
+    return expected_rmses, maes
 
 
 def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epochs=100):
@@ -167,9 +167,9 @@ def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epoc
 
     # Instead of using 9 embeddings, use a FC to compute the embedding given 5 review values.
     r2e = nn.Sequential(
-        nn.Linear(5, 200),
+        nn.Linear(5, 256),
         nn.ReLU(),
-        nn.Linear(200, embed_dim),
+        nn.Linear(256, embed_dim),
     ).to(device)
 
     # user feature
@@ -196,15 +196,22 @@ def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epoc
     best_rmse = 9999.0
     best_mae = 9999.0
     endure_count = 0
+    fields = ['overall', 'review_aroma', 'review_appearance', 'review_palate', 'review_taste']
 
     for epoch in range(1, epochs + 1):
 
         train(graphrec, device, train_loader, optimizer, epoch, best_rmse, best_mae)
-        expected_rmse, mae = test(graphrec, device, test_loader)
+        expected_rmses, maes = test(graphrec, device, test_loader)
         # please add the validation set to tune the hyper-parameters based on your datasets.
 
-        print(expected_rmse)
-        print(mae)
+        print(f'Debug: {expected_rmses}, {maes}')
+
+        for idx, (expected_rmse, mae) in enumerate(zip(expected_rmses, maes)):
+            print(f'Metrics for field {fields[idx]}:')
+            print(expected_rmse)
+            print(mae)
+
+        expected_rmse, mae = expected_rmses[0], maes[0]
 
         # early stopping (no validation set in toy dataset)
         if best_rmse > expected_rmse:
