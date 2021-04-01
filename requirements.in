@@ -11,3 +11,10 @@ torch==1.8.0
 sklearn
 alegnn
 hdf5storage
+
+# Needed by alegnn/utils/dataTools
+# This broke at runtime :/
+gensim
+
+# To avoid weird gensim warning
+python-Levenshtein

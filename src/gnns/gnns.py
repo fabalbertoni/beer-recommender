@@ -6,8 +6,9 @@ import typing as T
 from functools import wraps
 from time import time
 from enum import Enum
-from IPython.display import display
 
+import alegnn.modules.architectures as architectures
+import alegnn.utils.graphML as graphML
 import altair as alt
 import matplotlib.pyplot as plt
 import networkx as nx
@@ -15,9 +16,14 @@ import numpy as np
 import pandas as pd
 import scipy
 import seaborn as sns
+import torch
+from IPython.display import display
+
+from utils import train_model, plot_losses
+
 
 # Same directory structure as the shared Google Drive folder
-DATA_ROOT = "data/"
+DATA_ROOT = "../../data/"
 BEER_ADVOCATE_PATH = f"{DATA_ROOT}BeerAdvocate/"
 BEER_ADVOCATE_CSV = f"{BEER_ADVOCATE_PATH}beer_reviews.csv"
 
@@ -198,9 +204,20 @@ df_user_rating_train, df_user_rating_val, df_user_rating_test = train_val_test(
 
 # %%
 
-df_corr = make_df_corr(df_user_rating_train, rating_column)
+# df_corr = make_df_corr(df_user_rating_train, rating_column)
+
+# G, Wnorm = make_graph(df_corr)
+
+# By default it'll load from disk, no need to pass anything
+df_corr = make_df_corr(None, None)
 
 G, Wnorm = make_graph(df_corr)
+
+########################################################################
+########################################################################
+########################################################################
+########################################################################
+
 
 # %% [markdown]
 
@@ -333,5 +350,42 @@ print(f"Train shapes: {X_train.shape}; {y_train.shape}")
 print(f"Val shapes: {X_val.shape}; {y_val.shape}")
 print(f"Test shapes: {X_test.shape}; {y_test.shape}")
 
+
+# %% [markdown]
+
+## Entrenando la primera GNN
+
+# %%
+H = 64
+number_of_beers = G.number_of_nodes()
+
+train_data = torch.utils.data.TensorDataset(
+    torch.from_numpy(X_train).float(), torch.from_numpy(y_train).float()
+)
+val_data = torch.utils.data.TensorDataset(
+    torch.from_numpy(X_val).float(), torch.from_numpy(y_val).float()
+)
+
+# %%
+
+gnn_model = architectures.LocalGNN(
+    dimNodeSignals=[1, 64],
+    nFilterTaps=[5],
+    bias=True,
+    nonlinearity=torch.nn.ReLU,
+    nSelectedNodes=[number_of_beers],
+    poolingFunction=graphML.NoPool,
+    poolingSize=[1],
+    dimReadout=[1],
+    # Here we need the adjacency matrix from way above!
+    GSO=torch.from_numpy(Wnorm).float(),
+)
+(trained_gnn_model, train_loss_gnn, val_loss_gnn) = train_model(
+    gnn_model, train_data, val_data, n_epochs=1
+)
+
+# %%
+plt.rcParams.update({"text.usetex": False})
+plot_losses("GNN model", train_loss_gnn, val_loss_gnn)
 
 # %%
