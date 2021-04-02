@@ -19,6 +19,7 @@ from math import sqrt
 import datetime
 import argparse
 import os
+import matplotlib.pyplot as plt
 
 """
 GraphRec: Graph Neural Networks for Social Recommendation.
@@ -87,6 +88,7 @@ class GraphRec(nn.Module):
 def train(model, device, train_loader, optimizer, epoch, best_rmse, best_mae):
     model.train()
     running_loss = 0.0
+    loss_values = []
     for i, data in enumerate(train_loader, 0):
         batch_nodes_u, batch_nodes_v, labels_list = data
         # TODO: Not sure why we end up with shape (batch_size, 1, 5).
@@ -99,9 +101,12 @@ def train(model, device, train_loader, optimizer, epoch, best_rmse, best_mae):
         running_loss += loss.item()
         if i % 100 == 0:
             print('[%d, %5d] loss: %.3f, The best rmse/mae: %.6f / %.6f' % (
-                epoch, i, running_loss / 100, best_rmse, best_mae))
-            running_loss = 0.0
-    return 0
+                epoch, i, running_loss / (100 * i), best_rmse, best_mae))
+            # running_loss = 0.0
+
+    loss_values.append(running_loss / len(train_loader))
+
+    return loss_values
 
 
 def test(model, device, test_loader):
@@ -132,7 +137,7 @@ def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epoc
         use_cuda = True
     device = torch.device("cuda" if use_cuda else "cpu")
 
-    history_u_lists, history_ur_lists, history_v_lists, history_vr_lists, train_u, train_v, train_r, test_u, test_v, test_r, social_adj_lists = data
+    history_u_lists, history_ur_lists, history_v_lists, history_vr_lists, train_u, train_v, train_r, test_u, test_v, test_r, item_adj_lists = data
     """
     ## toy dataset
     history_u_lists, history_ur_lists:  user's purchased history (item set in training set), and his/her rating score (dict)
@@ -187,20 +192,26 @@ def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epoc
     enc_v_history = UV_Encoder(v2e, embed_dim, history_v_lists, history_vr_lists, agg_v_history, cuda=device, uv=False)
 
     # we do have item similarity data so we will add this piece and see if it works
-    # TODO: Add item adjancency
+    # item adjancency
+    # TODO Use item similarity later (enc_v).
+    agg_v_similarity = Social_Aggregator(lambda nodes: enc_v_history(nodes).t(), v2e, embed_dim, cuda=device)
+    enc_v = Social_Encoder(lambda nodes: enc_v_history(nodes).t(), embed_dim, item_adj_lists, agg_v_similarity,
+                           base_model=enc_v_history, cuda=device)
 
     # model
-    graphrec = GraphRec(enc_u_history, enc_v_history, r2e).to(device)
+    graphrec = GraphRec(enc_u_history, enc_v, r2e).to(device)
     optimizer = torch.optim.RMSprop(graphrec.parameters(), lr=lr, alpha=0.9)
 
     best_rmse = 9999.0
+    rmse_history = []
     best_mae = 9999.0
+    mae_history = []
     endure_count = 0
     fields = ['overall', 'review_aroma', 'review_appearance', 'review_palate', 'review_taste']
 
     for epoch in range(1, epochs + 1):
 
-        train(graphrec, device, train_loader, optimizer, epoch, best_rmse, best_mae)
+        loss_values = train(graphrec, device, train_loader, optimizer, epoch, best_rmse, best_mae)
         expected_rmses, maes = test(graphrec, device, test_loader)
         # please add the validation set to tune the hyper-parameters based on your datasets.
 
@@ -213,6 +224,9 @@ def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epoc
 
         expected_rmse, mae = expected_rmses[0], maes[0]
 
+        rmse_history.append(expected_rmse)
+        mae_history.append(mae)
+
         # early stopping (no validation set in toy dataset)
         if best_rmse > expected_rmse:
             best_rmse = expected_rmse
@@ -224,6 +238,17 @@ def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epoc
 
         if endure_count > 5:
             break
+
+    plt.title("Test metrics")
+    plt.plot(rmse_history, label='RMSE')
+    plt.plot(mae_history, label='MAE')
+    plt.legend()
+    plt.show()
+
+    plt.title("Test metrics")
+    plt.plot(loss_values, label='Train Loss')
+    plt.legend()
+    plt.show()
 
 
 # if __name__ == "__main__":
