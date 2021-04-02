@@ -142,7 +142,7 @@ def make_df_corr(
     most_correlated: int = 80,
     min_ratings: int = 20,
     recompute: bool = False,
-) -> T.Tuple[pd.DataFrame, nx.Graph, np.ndarray]:
+) -> pd.DataFrame:
 
     if not recompute:
         print("Loading persisted df_corr..")
