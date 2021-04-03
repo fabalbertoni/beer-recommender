@@ -99,7 +99,7 @@ def train(model, device, train_loader, optimizer, epoch, best_rmse, best_mae):
         loss.backward(retain_graph=True)
         optimizer.step()
         running_loss += loss.item()
-        if i % 100 == 0:
+        if i % 100 == 0 and i > 0:
             print('[%d, %5d] loss: %.3f, The best rmse/mae: %.6f / %.6f' % (
                 epoch, i, running_loss / (100 * i), best_rmse, best_mae))
             # running_loss = 0.0
@@ -129,9 +129,9 @@ def test(model, device, test_loader):
     return expected_rmses, maes
 
 
-def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epochs=100):
+def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epochs=100, use_similarity=False, gpu='0'):
 
-    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+    os.environ['CUDA_VISIBLE_DEVICES'] = gpu
     use_cuda = False
     if torch.cuda.is_available():
         use_cuda = True
@@ -199,7 +199,10 @@ def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epoc
                            base_model=enc_v_history, cuda=device)
 
     # model
-    graphrec = GraphRec(enc_u_history, enc_v, r2e).to(device)
+    if use_similarity:
+        graphrec = GraphRec(enc_u_history, enc_v, r2e).to(device)
+    else:
+        graphrec = GraphRec(enc_u_history, enc_v_history, r2e).to(device)
     optimizer = torch.optim.RMSprop(graphrec.parameters(), lr=lr, alpha=0.9)
 
     best_rmse = 9999.0
