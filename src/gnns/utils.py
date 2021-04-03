@@ -5,7 +5,6 @@ import numpy as np
 import pandas as pd
 
 
-# Same directory structure as the shared Google Drive folder
 DATA_ROOT = "../../data/"
 BEER_ADVOCATE_PATH = f"{DATA_ROOT}BeerAdvocate/"
 BEER_ADVOCATE_CSV = f"{BEER_ADVOCATE_PATH}beer_reviews.csv"
@@ -52,19 +51,24 @@ def rating_loss(prediction, ground_truth):
     return torch.mean((prediction[:, :, ix_item] - ground_truth[:, :, ix_item]) ** 2)
 
 
-def plot_losses(model_name, train_loss, test_loss):
+def plot_losses(
+    model_name: str,
+    train_loss: T.List[float],
+    evaluation_set_loss: T.List[float],
+    evaluation_set_name: str = "Validation",
+):
     plt.figure()
     plt.semilogy(train_loss)
     plt.xlabel("Step")
     plt.ylabel("Loss")
-    plt.title(model_name + " - Train Loss")
+    plt.title(f"{model_name} - Train Loss")
     plt.grid()
     plt.show()
     plt.figure()
-    plt.plot(test_loss)
+    plt.plot(evaluation_set_loss)
     plt.xlabel("Step")
     plt.ylabel("Loss")
-    plt.title(model_name + " - Test Loss")
+    plt.title(f"{model_name} - {evaluation_set_name} Loss")
     plt.grid()
     plt.show()
 
@@ -140,3 +144,5 @@ def load_df_corr() -> pd.DataFrame:
     df_corr["beer_beerid"] = df_corr["beer_beerid"].astype(str)
     df_corr = df_corr.set_index("beer_beerid")
     return df_corr
+
+# %%
