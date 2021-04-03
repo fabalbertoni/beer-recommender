@@ -1,31 +1,29 @@
 # %%
 
 # Imports, paths and functions
-import pickle
 import typing as T
 from functools import wraps
 from time import time
-from enum import Enum
 
 import alegnn.modules.architectures as architectures
 import alegnn.utils.graphML as graphML
-import altair as alt
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import pandas as pd
 import scipy
-import seaborn as sns
+
 import torch
-from IPython.display import display
 
-from utils import train_model, plot_losses
-
-
-# Same directory structure as the shared Google Drive folder
-DATA_ROOT = "../../data/"
-BEER_ADVOCATE_PATH = f"{DATA_ROOT}BeerAdvocate/"
-BEER_ADVOCATE_CSV = f"{BEER_ADVOCATE_PATH}beer_reviews.csv"
+from utils import (
+    train_model,
+    plot_losses,
+    load_datasets_X_y,
+    # save_datasets_X_y,
+    BEER_ADVOCATE_CSV,
+    load_train_val_test_df,
+    load_df_corr,
+)
 
 
 def timing(f):
@@ -104,27 +102,12 @@ def make_user_rating_matrix(
 
 
 @timing
-def train_val_test(
-    df_user_rating: pd.DataFrame, recompute: bool = False
-) -> pd.DataFrame:
-    if not recompute:
-        print("Loading persisted train, val, test sets..")
-        return (
-            pd.read_csv(
-                f"{BEER_ADVOCATE_PATH}df_user_rating_train.csv",
-            ).set_index("review_profilename"),
-            pd.read_csv(
-                f"{BEER_ADVOCATE_PATH}df_user_rating_val.csv",
-            ).set_index("review_profilename"),
-            pd.read_csv(
-                f"{BEER_ADVOCATE_PATH}df_user_rating_test.csv",
-            ).set_index("review_profilename"),
-        )
+def train_val_test(df_user_rating: pd.DataFrame) -> pd.DataFrame:
 
     split_train_val_proportions = (0.8, 0.1)
 
     indexes_arr = np.arange(len(df_user_rating))
-    shuffled_indexes_arr = np.random.shuffle(indexes_arr)
+    np.random.shuffle(indexes_arr)
 
     train_max = int(split_train_val_proportions[0] * len(df_user_rating))
     val_max = train_max + int(split_train_val_proportions[1] * len(df_user_rating))
@@ -141,17 +124,7 @@ def make_df_corr(
     rating_column: str,
     most_correlated: int = 80,
     min_ratings: int = 20,
-    recompute: bool = False,
 ) -> pd.DataFrame:
-
-    if not recompute:
-        print("Loading persisted df_corr..")
-        df_corr = pd.read_csv(f"{BEER_ADVOCATE_PATH}df_corr.csv")
-
-        # So the columns and the index match.
-        df_corr["beer_beerid"] = df_corr["beer_beerid"].astype(str)
-        df_corr = df_corr.set_index("beer_beerid")
-        return df_corr
 
     df_corr = df_user_rating.corr(min_periods=min_ratings)
 
@@ -184,6 +157,12 @@ def make_graph(df_corr: pd.DataFrame) -> T.Tuple[nx.Graph, np.ndarray]:
     return Gcc0, Wnorm
 
 
+# RECOMPUTES
+recompute_train_val_test = False
+recompute_df_corr = False
+recompute_X_y = False
+
+
 # %% [markdown]
 
 ## Procesamos los datos en un DataFrame de correlación y un grafo asociado
@@ -198,20 +177,28 @@ rating_column = "review_overall"
 # Get df_user_rating and split it in train, val and test
 df_user_rating = make_user_rating_matrix(df_review, rating_column)
 
-df_user_rating_train, df_user_rating_val, df_user_rating_test = train_val_test(
-    df_user_rating
-)
+
+if recompute_train_val_test:
+    df_user_rating_train, df_user_rating_val, df_user_rating_test = train_val_test(
+        df_user_rating
+    )
+else:
+    (
+        df_user_rating_train,
+        df_user_rating_val,
+        df_user_rating_test,
+    ) = load_train_val_test_df()
 
 # %%
 
-# df_corr = make_df_corr(df_user_rating_train, rating_column)
 
-# G, Wnorm = make_graph(df_corr)
-
-# By default it'll load from disk, no need to pass anything
-df_corr = make_df_corr(None, None)
+if recompute_df_corr:
+    df_corr = make_df_corr(df_user_rating_train, rating_column)
+else:
+    df_corr = load_df_corr()
 
 G, Wnorm = make_graph(df_corr)
+
 
 ########################################################################
 ########################################################################
@@ -241,12 +228,12 @@ def adjust_dfs_to_graph(
 
     item_to_predict = items_to_predict[0]
 
-    nodes_in_graph = list(G.nodes())
-
-    # We remove the users' rows who didn't rate `the_beer`
-    df_train_adjusted = df_user_rating_train.dropna(subset=[the_beer], axis="rows")
-    df_val_adjusted = df_user_rating_val.dropna(subset=[the_beer], axis="rows")
-    df_test_adjusted = df_user_rating_test.dropna(subset=[the_beer], axis="rows")
+    # We remove the users' rows who didn't rate `item_to_predict`
+    df_train_adjusted = df_user_rating_train.dropna(
+        subset=[item_to_predict], axis="rows"
+    )
+    df_val_adjusted = df_user_rating_val.dropna(subset=[item_to_predict], axis="rows")
+    df_test_adjusted = df_user_rating_test.dropna(subset=[item_to_predict], axis="rows")
 
     # We remove those beers which were left out of the graph G
     beers_in_G = list(G.nodes())
@@ -258,7 +245,7 @@ def adjust_dfs_to_graph(
 
 
 def get_X_y(
-    df: pd.DataFrame, W: np.ndarray, items_to_predict: T.List[str]
+    df: pd.DataFrame, items_to_predict: T.List[str]
 ) -> T.Tuple[np.ndarray, np.ndarray]:
     if len(items_to_predict) != 1:
         raise NotImplementedError(
@@ -278,7 +265,7 @@ def get_X_y(
         df_user_rating.fillna(0).to_numpy()  # We get rid of NaNs here
         # Here we convert each user's ratings into a 1xnumberOfNodex matrix
         # We might have more than 1 dimension later.
-        .reshape((len(df_user_rating), 1, W.shape[0]))
+        .reshape((len(df_user_rating), 1, len(df.columns)))
     )
 
     # We put back the target item's rating, to assemble `y`
@@ -288,7 +275,7 @@ def get_X_y(
     y = (
         df_user_rating.fillna(0)
         .to_numpy()
-        .reshape((len(df_user_rating), 1, W.shape[0]))
+        .reshape((len(df_user_rating), 1, len(df.columns)))
     )
 
     return X, y
@@ -300,51 +287,26 @@ def get_X_y(
 df_user_rating_train, df_user_rating_val, df_user_rating_test = adjust_dfs_to_graph(
     df_user_rating_train, df_user_rating_val, df_user_rating_test, G, [the_beer]
 )
+assert (
+    len(df_user_rating_train.columns)
+    == len(df_user_rating_val.columns)
+    == len(df_user_rating_test.columns)
+    == Wnorm.shape[0]
+    == Wnorm.shape[1]
+)
 
 # %%
 
-recompute_X_y = False
 if recompute_X_y:
-    X_train, y_train = get_X_y(df_user_rating_train, Wnorm, [the_beer])
-    X_val, y_val = get_X_y(df_user_rating_val, Wnorm, [the_beer])
-    X_test, y_test = get_X_y(df_user_rating_test, Wnorm, [the_beer])
 
-    with open(f"{BEER_ADVOCATE_PATH}X_train.npy", "wb") as f:
-        np.save(f, X_train)
+    X_train, y_train = get_X_y(df_user_rating_train, [the_beer])
+    X_val, y_val = get_X_y(df_user_rating_val, [the_beer])
+    X_test, y_test = get_X_y(df_user_rating_test, [the_beer])
 
-    with open(f"{BEER_ADVOCATE_PATH}y_train.npy", "wb") as f:
-        np.save(f, y_train)
-
-    with open(f"{BEER_ADVOCATE_PATH}X_val.npy", "wb") as f:
-        np.save(f, X_val)
-
-    with open(f"{BEER_ADVOCATE_PATH}y_val.npy", "wb") as f:
-        np.save(f, y_val)
-
-    with open(f"{BEER_ADVOCATE_PATH}X_test.npy", "wb") as f:
-        np.save(f, X_test)
-
-    with open(f"{BEER_ADVOCATE_PATH}y_test.npy", "wb") as f:
-        np.save(f, y_test)
+    # save_datasets_X_y(X_train, y_train, X_val, y_val, X_train, y_test)
 
 else:
-    with open(f"{BEER_ADVOCATE_PATH}X_train.npy", "rb") as f:
-        X_train = np.load(f)
-
-    with open(f"{BEER_ADVOCATE_PATH}y_train.npy", "rb") as f:
-        y_train = np.load(f)
-
-    with open(f"{BEER_ADVOCATE_PATH}X_val.npy", "rb") as f:
-        X_val = np.load(f)
-
-    with open(f"{BEER_ADVOCATE_PATH}y_val.npy", "rb") as f:
-        y_val = np.load(f)
-
-    with open(f"{BEER_ADVOCATE_PATH}X_test.npy", "rb") as f:
-        X_test = np.load(f)
-
-    with open(f"{BEER_ADVOCATE_PATH}y_test.npy", "rb") as f:
-        y_test = np.load(f)
+    [X_train, y_train, X_val, y_val, X_test, y_test] = load_datasets_X_y()
 
 print(f"Train shapes: {X_train.shape}; {y_train.shape}")
 print(f"Val shapes: {X_val.shape}; {y_val.shape}")
@@ -356,8 +318,6 @@ print(f"Test shapes: {X_test.shape}; {y_test.shape}")
 ## Entrenando la primera GNN
 
 # %%
-H = 64
-number_of_beers = G.number_of_nodes()
 
 train_data = torch.utils.data.TensorDataset(
     torch.from_numpy(X_train).float(), torch.from_numpy(y_train).float()
@@ -373,7 +333,7 @@ gnn_model = architectures.LocalGNN(
     nFilterTaps=[5],
     bias=True,
     nonlinearity=torch.nn.ReLU,
-    nSelectedNodes=[number_of_beers],
+    nSelectedNodes=[Wnorm.shape[0]],  # Number of nodes
     poolingFunction=graphML.NoPool,
     poolingSize=[1],
     dimReadout=[1],
@@ -381,11 +341,8 @@ gnn_model = architectures.LocalGNN(
     GSO=torch.from_numpy(Wnorm).float(),
 )
 (trained_gnn_model, train_loss_gnn, val_loss_gnn) = train_model(
-    gnn_model, train_data, val_data, n_epochs=1
+    gnn_model, train_data, val_data, n_epochs=2
 )
 
-# %%
 plt.rcParams.update({"text.usetex": False})
 plot_losses("GNN model", train_loss_gnn, val_loss_gnn)
-
-# %%
