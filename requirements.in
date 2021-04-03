@@ -1,7 +1,6 @@
 jupyterlab
 pandas
 networkx
-tensorflow
 altair
 seaborn
 black==20.8b1
