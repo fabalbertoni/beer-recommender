@@ -1,5 +1,4 @@
 # %%
-
 # Imports, paths and functions
 import typing as T
 from functools import wraps
@@ -350,6 +349,7 @@ gnn_model.to(device)
     gnn_model, train_data, val_data, n_epochs=3
 )
 
+# %%
 print(f"train_loss_gnn: {train_loss_gnn}")
 print(f"val_loss_gnn: {val_loss_gnn}")
 
