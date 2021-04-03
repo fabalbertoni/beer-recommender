@@ -211,10 +211,12 @@ def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epoc
     mae_history = []
     endure_count = 0
     fields = ['overall', 'review_aroma', 'review_appearance', 'review_palate', 'review_taste']
+    loss_history = []
 
     for epoch in range(1, epochs + 1):
 
         loss_values = train(graphrec, device, train_loader, optimizer, epoch, best_rmse, best_mae)
+        loss_history.extend(loss_values)
         expected_rmses, maes = test(graphrec, device, test_loader)
         # please add the validation set to tune the hyper-parameters based on your datasets.
 
@@ -248,8 +250,8 @@ def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epoc
     plt.legend()
     plt.show()
 
-    plt.title("Test metrics")
-    plt.plot(loss_values, label='Train Loss')
+    plt.title("Loss history")
+    plt.plot(loss_history, label='Train Loss')
     plt.legend()
     plt.show()
 
