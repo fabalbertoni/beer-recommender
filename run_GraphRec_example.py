@@ -129,7 +129,7 @@ def test(model, device, test_loader):
     return expected_rmses, maes
 
 
-def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epochs=100, use_similarity=False, gpu='0'):
+def run(data, batch_size=128, embed_dim=64, r_hidden_dim=256, lr=0.001, test_batch_size=1000, epochs=100, use_similarity=False, gpu='0'):
 
     os.environ['CUDA_VISIBLE_DEVICES'] = gpu
     use_cuda = False
@@ -137,7 +137,7 @@ def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epoc
         use_cuda = True
     device = torch.device("cuda" if use_cuda else "cpu")
 
-    history_u_lists, history_ur_lists, history_v_lists, history_vr_lists, train_u, train_v, train_r, test_u, test_v, test_r, item_adj_lists = data
+    history_u_lists, history_ur_lists, history_v_lists, history_vr_lists, train_u, train_v, train_r, val_u, val_v, val_r, test_u, test_v, test_r, item_adj_lists = data
     """
     ## toy dataset
     history_u_lists, history_ur_lists:  user's purchased history (item set in training set), and his/her rating score (dict)
@@ -156,9 +156,12 @@ def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epoc
 
     trainset = torch.utils.data.TensorDataset(torch.LongTensor(train_u), torch.LongTensor(train_v),
                                               torch.FloatTensor(train_r))
+    valset = torch.utils.data.TensorDataset(torch.LongTensor(val_u), torch.LongTensor(val_v),
+                                            torch.FloatTensor(val_r))
     testset = torch.utils.data.TensorDataset(torch.LongTensor(test_u), torch.LongTensor(test_v),
                                              torch.FloatTensor(test_r))
     train_loader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True)
+    val_loader = torch.utils.data.DataLoader(valset, batch_size=test_batch_size, shuffle=True)
     test_loader = torch.utils.data.DataLoader(testset, batch_size=test_batch_size, shuffle=True)
     num_users = history_u_lists.__len__()
     num_items = history_v_lists.__len__()
@@ -170,9 +173,9 @@ def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epoc
 
     # Instead of using 9 embeddings, use a FC to compute the embedding given 5 review values.
     r2e = nn.Sequential(
-        nn.Linear(5, 256),
+        nn.Linear(5, r_hidden_dim),
         nn.ReLU(),
-        nn.Linear(256, embed_dim),
+        nn.Linear(r_hidden_dim, embed_dim),
     ).to(device)
 
     # user feature
@@ -204,9 +207,12 @@ def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epoc
     optimizer = torch.optim.RMSprop(graphrec.parameters(), lr=lr, alpha=0.9)
 
     best_rmse = 9999.0
-    rmse_history = []
+    train_rmse_history = {}
+    val_rmse_history = {}
+
     best_mae = 9999.0
-    mae_history = []
+    train_mae_history = {}
+    val_mae_history = {}
     endure_count = 0
     fields = ['overall', 'review_aroma', 'review_appearance', 'review_palate', 'review_taste']
     loss_history = []
@@ -215,21 +221,28 @@ def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epoc
 
         loss_values = train(graphrec, device, train_loader, optimizer, epoch, best_rmse, best_mae)
         loss_history.extend(loss_values)
-        expected_rmses, maes = test(graphrec, device, test_loader)
-        # please add the validation set to tune the hyper-parameters based on your datasets.
 
-        print(f'Debug: {expected_rmses}, {maes}')
+        # Metrics
+        train_expected_rmses, train_maes = test(graphrec, device, train_loader)
+        for idx, (expected_rmse, mae) in enumerate(zip(train_expected_rmses, train_maes)):
+            train_rmse_history.setdefault(fields[idx], []).append(expected_rmse)
+            train_mae_history.setdefault(fields[idx], []).append(mae)
 
-        for idx, (expected_rmse, mae) in enumerate(zip(expected_rmses, maes)):
-            print(f'Metrics for field {fields[idx]}:')
+            print(f'TRAIN metrics for field {fields[idx]}:')
             print(expected_rmse)
             print(mae)
 
-        expected_rmse, mae = expected_rmses[0], maes[0]
+        val_expected_rmses, val_maes = test(graphrec, device, val_loader)
+        for idx, (expected_rmse, mae) in enumerate(zip(val_expected_rmses, val_maes)):
+            val_rmse_history.setdefault(fields[idx], []).append(expected_rmse)
+            val_mae_history.setdefault(fields[idx], []).append(mae)
 
-        rmse_history.append(expected_rmse)
-        mae_history.append(mae)
+            print(f'VALIDATION metrics for field {fields[idx]}:')
+            print(expected_rmse)
+            print(mae)
 
+        expected_rmse = val_expected_rmses[0]
+        mae = val_maes[0]
         # early stopping (no validation set in toy dataset)
         if best_rmse > expected_rmse:
             best_rmse = expected_rmse
@@ -237,22 +250,27 @@ def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epoc
             endure_count = 0
         else:
             endure_count += 1
-        print("rmse: %.4f, mae:%.4f " % (expected_rmse, mae))
+        print("val rmse: %.4f, val mae:%.4f " % (expected_rmse, mae))
 
         if endure_count > 5:
             break
-
-    plt.title("Test metrics")
-    plt.plot(rmse_history, label='RMSE')
-    plt.plot(mae_history, label='MAE')
-    plt.legend()
-    plt.show()
 
     plt.title("Loss history")
     plt.plot(loss_history, label='Train Loss')
     plt.legend()
     plt.show()
 
+    for field in fields:
+        plt.title(f"Metrics for {field}")
+        plt.plot(train_rmse_history['field'], label='TRAIN RMSE')
+        plt.plot(train_mae_history['field'], label='TRAIN MAE')
+        plt.plot(val_rmse_history['field'], label='VAL RMSE')
+        plt.plot(val_rmse_history['field'], label='VAL MAE')
+        plt.legend()
+        plt.show()
 
-# if __name__ == "__main__":
-#     main()
+    expected_rmses, maes = test(graphrec, device, test_loader)
+    for idx, (expected_rmse, mae) in enumerate(zip(expected_rmses, maes)):
+        print(f'TEST metrics for field {fields[idx]}:')
+        print(expected_rmse)
+        print(mae)
