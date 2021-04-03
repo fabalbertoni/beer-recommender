@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+
 # Same directory structure as the shared Google Drive folder
 DATA_ROOT = "../../data/"
 BEER_ADVOCATE_PATH = f"{DATA_ROOT}BeerAdvocate/"
@@ -26,6 +27,7 @@ def train_model(model, train_data, test_data, batch_size=5, n_epochs=40, epsilon
     test_loss = []
     for epoch in range(n_epochs):
         for x_batch, y_batch in train_loader:
+
             model.zero_grad()
             y_hat = model.forward(x_batch)
             loss = rating_loss(y_hat, y_batch)
@@ -33,7 +35,6 @@ def train_model(model, train_data, test_data, batch_size=5, n_epochs=40, epsilon
             optimizer.step()
             train_loss.append(loss.item())
 
-        # Después de cada epoch miramos el test loss
         for x_batch, y_batch in test_loader:
             y_hattest = model(x_batch)
             test_loss.append(rating_loss(y_hattest, y_batch).item())

@@ -19,11 +19,16 @@ from utils import (
     train_model,
     plot_losses,
     load_datasets_X_y,
-    # save_datasets_X_y,
+    save_datasets_X_y,
     BEER_ADVOCATE_CSV,
     load_train_val_test_df,
     load_df_corr,
 )
+
+# RECOMPUTES
+recompute_train_val_test = False
+recompute_df_corr = False
+recompute_X_y = False
 
 
 def timing(f):
@@ -157,12 +162,6 @@ def make_graph(df_corr: pd.DataFrame) -> T.Tuple[nx.Graph, np.ndarray]:
     return Gcc0, Wnorm
 
 
-# RECOMPUTES
-recompute_train_val_test = False
-recompute_df_corr = False
-recompute_X_y = False
-
-
 # %% [markdown]
 
 ## Procesamos los datos en un DataFrame de correlación y un grafo asociado
@@ -265,7 +264,7 @@ def get_X_y(
         df_user_rating.fillna(0).to_numpy()  # We get rid of NaNs here
         # Here we convert each user's ratings into a 1xnumberOfNodex matrix
         # We might have more than 1 dimension later.
-        .reshape((len(df_user_rating), 1, len(df.columns)))
+        .reshape((len(df_user_rating), 1, len(df_user_rating.columns)))
     )
 
     # We put back the target item's rating, to assemble `y`
@@ -275,7 +274,7 @@ def get_X_y(
     y = (
         df_user_rating.fillna(0)
         .to_numpy()
-        .reshape((len(df_user_rating), 1, len(df.columns)))
+        .reshape((len(df_user_rating), 1, len(df_user_rating.columns)))
     )
 
     return X, y
@@ -298,12 +297,12 @@ assert (
 # %%
 
 if recompute_X_y:
-
+    print("Recomputing X, y...")
     X_train, y_train = get_X_y(df_user_rating_train, [the_beer])
     X_val, y_val = get_X_y(df_user_rating_val, [the_beer])
     X_test, y_test = get_X_y(df_user_rating_test, [the_beer])
 
-    # save_datasets_X_y(X_train, y_train, X_val, y_val, X_train, y_test)
+    save_datasets_X_y(X_train, y_train, X_val, y_val, X_train, y_test)
 
 else:
     [X_train, y_train, X_val, y_val, X_test, y_test] = load_datasets_X_y()
@@ -318,12 +317,17 @@ print(f"Test shapes: {X_test.shape}; {y_test.shape}")
 ## Entrenando la primera GNN
 
 # %%
+# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = "cpu"
+print(f"Device: {device}")
 
 train_data = torch.utils.data.TensorDataset(
-    torch.from_numpy(X_train).float(), torch.from_numpy(y_train).float()
+    torch.from_numpy(X_train).to(device).float(),
+    torch.from_numpy(y_train).to(device).float(),
 )
 val_data = torch.utils.data.TensorDataset(
-    torch.from_numpy(X_val).float(), torch.from_numpy(y_val).float()
+    torch.from_numpy(X_val).to(device).float(),
+    torch.from_numpy(y_val).to(device).float(),
 )
 
 # %%
@@ -338,11 +342,21 @@ gnn_model = architectures.LocalGNN(
     poolingSize=[1],
     dimReadout=[1],
     # Here we need the adjacency matrix from way above!
-    GSO=torch.from_numpy(Wnorm).float(),
+    GSO=torch.from_numpy(Wnorm).to(device).float(),
 )
+gnn_model.to(device)
+
 (trained_gnn_model, train_loss_gnn, val_loss_gnn) = train_model(
-    gnn_model, train_data, val_data, n_epochs=2
+    gnn_model, train_data, val_data, n_epochs=3
 )
+
+print(f"train_loss_gnn: {train_loss_gnn}")
+print(f"val_loss_gnn: {val_loss_gnn}")
+
+# This doesn't work
+# gnn_model.save("gnn40epochs.pth")
 
 plt.rcParams.update({"text.usetex": False})
 plot_losses("GNN model", train_loss_gnn, val_loss_gnn)
+
+# %%
