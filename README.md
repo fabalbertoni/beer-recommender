@@ -6,7 +6,6 @@
 To fire up the notebooks we recommend using [JupyterLab](http://jupyterlab.io/) within a virtualenv.
 
 This was tested in Python 3.8.
-Tensorflow (which will be used by GraphEDM) does not work in 3.9-3.10 yet.
 
 To create a virtualenv:
 
