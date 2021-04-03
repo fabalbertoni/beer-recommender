@@ -99,9 +99,9 @@ def train(model, device, train_loader, optimizer, epoch, best_rmse, best_mae):
         loss.backward(retain_graph=True)
         optimizer.step()
         running_loss += loss.item()
-        if i % 100 == 0 and i > 0:
+        if i % 1000 == 0 and i > 0:
             print('[%d, %5d] loss: %.3f, The best rmse/mae: %.6f / %.6f' % (
-                epoch, i, running_loss / (100 * i), best_rmse, best_mae))
+                epoch, i, running_loss / (1000 * i), best_rmse, best_mae))
             # running_loss = 0.0
 
     loss_values.append(running_loss / len(train_loader))
@@ -161,9 +161,7 @@ def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epoc
     train_loader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True)
     test_loader = torch.utils.data.DataLoader(testset, batch_size=test_batch_size, shuffle=True)
     num_users = history_u_lists.__len__()
-    print(num_users)
     num_items = history_v_lists.__len__()
-    print(num_items)
     # Not used for now
     # num_ratings = ratings_list.__len__()
 
