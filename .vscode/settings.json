@@ -3,6 +3,11 @@
         "--config-file=${workspaceFolder}/mypy.ini"
     ],
     "python.linting.mypyEnabled": true,
-    "python.linting.pylintEnabled": false,
+    "python.linting.flake8Enabled": true,
+    "python.linting.flake8Args": [
+        "--ignore=E24,W504,E266,W503",
+        "--max-line-length=100",
+        "--verbose"
+    ],
     "python.linting.enabled": true
 }

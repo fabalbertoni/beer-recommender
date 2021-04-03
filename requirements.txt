@@ -56,6 +56,8 @@ entrypoints==0.3
     # via
     #   altair
     #   nbconvert
+flake8==3.9.0
+    # via -r requirements.in
 flatbuffers==1.12
     # via tensorflow
 gast==0.3.3
@@ -84,6 +86,8 @@ idna==2.10
     # via
     #   anyio
     #   requests
+ipdb==0.13.7
+    # via -r requirements.in
 ipykernel==5.5.0
     # via notebook
 ipython-genutils==0.2.0
@@ -94,6 +98,7 @@ ipython-genutils==0.2.0
     #   traitlets
 ipython==7.21.0
     # via
+    #   ipdb
     #   ipykernel
     #   jupyterlab
 jedi==0.18.0
@@ -152,6 +157,8 @@ markupsafe==1.1.1
     # via jinja2
 matplotlib==3.3.4
     # via seaborn
+mccabe==0.6.1
+    # via flake8
 mistune==0.8.4
     # via nbconvert
 mypy-extensions==0.4.3
@@ -244,8 +251,12 @@ pyasn1==0.4.8
     # via
     #   pyasn1-modules
     #   rsa
+pycodestyle==2.7.0
+    # via flake8
 pycparser==2.20
     # via cffi
+pyflakes==2.3.1
+    # via flake8
 pygments==2.8.1
     # via
     #   ipython
@@ -339,7 +350,9 @@ testpath==0.4.4
 threadpoolctl==2.1.0
     # via scikit-learn
 toml==0.10.2
-    # via black
+    # via
+    #   black
+    #   ipdb
 toolz==0.11.1
     # via altair
 torch==1.8.0
