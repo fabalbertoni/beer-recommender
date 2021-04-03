@@ -203,6 +203,13 @@ def decompose_graph(graph, split_ratio=.8):
     test_v = v[int(N * split_ratio):]
     test_r = r[int(N * split_ratio):]
 
+    # Use val and test sets
+    split = int(len(test_u) / 2)
+
+    val_u, test_u = test_u[:split], test_u[split:]
+    val_v, test_v = test_v[:split], test_v[split:]
+    val_r, test_r = test_r[:split], test_r[split:]
+
     print('7')
 
     item_adj_lists = {le_items.transform([item])[0]: le_items.transform(list(set(graph.neighbors(item)))) for item in graph.nodes() if isinstance(item, int)}
@@ -211,7 +218,7 @@ def decompose_graph(graph, split_ratio=.8):
     assert len(history_v_lists) == len(history_vr_lists)
 
     return (history_u_lists, history_ur_lists, history_v_lists, history_vr_lists, train_u, train_v,
-            train_r, test_u, test_v, test_r, item_adj_lists)
+            train_r, val_u, val_v, val_r, test_u, test_v, test_r, item_adj_lists)
 
 
 def get_beers_mask(graph):
