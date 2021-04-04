@@ -265,7 +265,7 @@ def run(data, batch_size=128, embed_dim=64, r_hidden_dim=256, lr=0.001, test_bat
         plt.plot(train_rmse_history['field'], label='TRAIN RMSE')
         plt.plot(train_mae_history['field'], label='TRAIN MAE')
         plt.plot(val_rmse_history['field'], label='VAL RMSE')
-        plt.plot(val_rmse_history['field'], label='VAL MAE')
+        plt.plot(val_mae_history['field'], label='VAL MAE')
         plt.legend()
         plt.show()
 
