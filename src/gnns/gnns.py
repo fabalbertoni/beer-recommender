@@ -267,7 +267,9 @@ def get_X_y(
     )
 
     # We put back the target item's rating, to assemble `y`
-    df_user_rating[:] = 0
+    df_user_rating = pd.DataFrame(
+        0, index=df_user_rating.index, columns=df_user_rating.columns
+    )
     df_user_rating[the_item] = the_item_rating
 
     y = (
