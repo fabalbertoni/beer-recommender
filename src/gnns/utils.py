@@ -145,4 +145,5 @@ def load_df_corr() -> pd.DataFrame:
     df_corr = df_corr.set_index("beer_beerid")
     return df_corr
 
+
 # %%

@@ -18,7 +18,7 @@ from utils import (
     train_model,
     plot_losses,
     load_datasets_X_y,
-    save_datasets_X_y,
+    # save_datasets_X_y,
     BEER_ADVOCATE_CSV,
     load_train_val_test_df,
     load_df_corr,
@@ -27,7 +27,7 @@ from utils import (
 # RECOMPUTES
 recompute_train_val_test = False
 recompute_df_corr = False
-recompute_X_y = False
+recompute_X_y = True
 
 
 def timing(f):
@@ -218,20 +218,13 @@ def adjust_dfs_to_graph(
     df_val: pd.DataFrame,
     df_test: pd.DataFrame,
     G: nx.Graph,
-    items_to_predict: T.List[str],
+    column_to_predict: str,
 ) -> T.Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 
-    if len(items_to_predict) != 1:
-        raise NotImplementedError("For now we're supporting prediction of one item")
-
-    item_to_predict = items_to_predict[0]
-
     # We remove the users' rows who didn't rate `item_to_predict`
-    df_train_adjusted = df_user_rating_train.dropna(
-        subset=[item_to_predict], axis="rows"
-    )
-    df_val_adjusted = df_user_rating_val.dropna(subset=[item_to_predict], axis="rows")
-    df_test_adjusted = df_user_rating_test.dropna(subset=[item_to_predict], axis="rows")
+    df_train_adjusted = df_train.dropna(subset=[column_to_predict], axis="rows")
+    df_val_adjusted = df_val.dropna(subset=[column_to_predict], axis="rows")
+    df_test_adjusted = df_test.dropna(subset=[column_to_predict], axis="rows")
 
     # We remove those beers which were left out of the graph G
     beers_in_G = list(G.nodes())
@@ -243,21 +236,15 @@ def adjust_dfs_to_graph(
 
 
 def get_X_y(
-    df: pd.DataFrame, items_to_predict: T.List[str]
+    df: pd.DataFrame, column_to_predict: str
 ) -> T.Tuple[np.ndarray, np.ndarray]:
-    if len(items_to_predict) != 1:
-        raise NotImplementedError(
-            "We do not support more than one element to predict yet."
-        )
-
-    the_item = items_to_predict[0]
 
     df_user_rating = df.copy()
 
     # `X` will have zeros for the beer, since we want to predict those values
     # We'll put them in `y`.
-    the_item_rating = df_user_rating[the_item]
-    df_user_rating[the_item] = 0
+    the_item_rating = df_user_rating[column_to_predict]
+    df_user_rating[column_to_predict] = 0
 
     X = (
         df_user_rating.fillna(0).to_numpy()  # We get rid of NaNs here
@@ -270,7 +257,7 @@ def get_X_y(
     df_user_rating = pd.DataFrame(
         0, index=df_user_rating.index, columns=df_user_rating.columns
     )
-    df_user_rating[the_item] = the_item_rating
+    df_user_rating[column_to_predict] = the_item_rating
 
     y = (
         df_user_rating.fillna(0)
@@ -281,31 +268,82 @@ def get_X_y(
     return X, y
 
 
-# %%
+@timing
+def get_X_y_columns(
+    df_train: pd.DataFrame,
+    df_val: pd.DataFrame,
+    df_test: pd.DataFrame,
+    G: nx.Graph,
+    columns: T.Optional[T.List[str]] = None,
+) -> T.Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
 
-# We remove the users' rows who didn't rate `the_beer`
-df_user_rating_train, df_user_rating_val, df_user_rating_test = adjust_dfs_to_graph(
-    df_user_rating_train, df_user_rating_val, df_user_rating_test, G, [the_beer]
-)
-assert (
-    len(df_user_rating_train.columns)
-    == len(df_user_rating_val.columns)
-    == len(df_user_rating_test.columns)
-    == Wnorm.shape[0]
-    == Wnorm.shape[1]
-)
+    assert (df_train.columns == df_val.columns).all() and (
+        df_train.columns == df_test.columns
+    ).all()
+
+    if columns is not None and not columns:
+        raise ValueError("If provided, the columns list must not be empty.")
+    elif not columns:
+        print("Will process ALL columns")
+        columns = list(df_train.columns)
+    else:
+        print(f"Will process columns: {columns}")
+
+    X_train_lst, y_train_lst, X_val_lst, y_val_lst, X_test_lst, y_test_lst = (
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+    )
+
+    five_percent_step = int(len(columns) * 0.05)
+    for i, column in enumerate(columns):
+        if five_percent_step and i % five_percent_step == 0:
+            print(f"Column {i} of {len(columns)}")
+
+        try:
+            df_train_filtered, df_val_filtered, df_test_filtered = adjust_dfs_to_graph(
+                df_train, df_val, df_test, G, column
+            )
+
+            X_train, y_train = get_X_y(df_train_filtered, column)
+            X_val, y_val = get_X_y(df_val_filtered, column)
+            X_test, y_test = get_X_y(df_test_filtered, column)
+
+            X_train_lst.append(X_train)
+            y_train_lst.append(y_train)
+            X_val_lst.append(X_val)
+            y_val_lst.append(y_val)
+            X_test_lst.append(X_test)
+            y_test_lst.append(y_test)
+        except Exception as e:
+            print(f"FAILED ON COLUMN: {column}: {e}")
+            continue
+
+    return (
+        np.concatenate(X_train_lst, axis=0),
+        np.concatenate(y_train_lst, axis=0),
+        np.concatenate(X_val_lst, axis=0),
+        np.concatenate(y_val_lst, axis=0),
+        np.concatenate(X_test_lst, axis=0),
+        np.concatenate(y_test_lst, axis=0),
+    )
+
 
 # %%
 
 if recompute_X_y:
     print("Recomputing X, y...")
-    X_train, y_train = get_X_y(df_user_rating_train, [the_beer])
-    X_val, y_val = get_X_y(df_user_rating_val, [the_beer])
-    X_test, y_test = get_X_y(df_user_rating_test, [the_beer])
+    (X_train, y_train, X_val, y_val, X_test, y_test) = get_X_y_columns(
+        df_user_rating_train, df_user_rating_val, df_user_rating_test, G, [the_beer]
+    )
 
-    save_datasets_X_y(X_train, y_train, X_val, y_val, X_train, y_test)
+    # save_datasets_X_y(X_train, y_train, X_val, y_val, X_train, y_test)
 
 else:
+    # This loads arrays just for `the_beer`
     [X_train, y_train, X_val, y_val, X_test, y_test] = load_datasets_X_y()
 
 print(f"Train shapes: {X_train.shape}; {y_train.shape}")
@@ -361,4 +399,66 @@ print(f"val_loss_gnn: {val_loss_gnn}")
 plt.rcParams.update({"text.usetex": False})
 plot_losses("GNN model", train_loss_gnn, val_loss_gnn)
 
+# %% [markdown]
+
+## Probemos con más cervezas a la vez
+### Elegimos cervezas con muchas reviews
+
+# %%
+n_target_beers = 1
+n_ratings_by_beer = (~df_user_rating_train.isnull()).sum()
+random_beers = (
+    n_ratings_by_beer.sort_values(ascending=False)
+    .iloc[:200]
+    .sample(n_target_beers)
+    .index
+)
+random_beer_names = df_beer.loc[random_beers.astype(int), "beer_name"]
+random_beers = [str(beer_id) for beer_id in random_beers]
+print(random_beer_names)
+
+# %%
+(X_train, y_train, X_val, y_val, X_test, y_test) = get_X_y_columns(
+    df_user_rating_train, df_user_rating_val, df_user_rating_test, G, random_beers
+)
+# %%
+
+train_data = torch.utils.data.TensorDataset(
+    torch.from_numpy(X_train).to(device).float(),
+    torch.from_numpy(y_train).to(device).float(),
+)
+val_data = torch.utils.data.TensorDataset(
+    torch.from_numpy(X_val).to(device).float(),
+    torch.from_numpy(y_val).to(device).float(),
+)
+
+# %%
+
+gnn_model = architectures.LocalGNN(
+    dimNodeSignals=[1, 64],
+    nFilterTaps=[5],
+    bias=True,
+    nonlinearity=torch.nn.ReLU,
+    nSelectedNodes=[Wnorm.shape[0]],  # Number of nodes
+    poolingFunction=graphML.NoPool,
+    poolingSize=[1],
+    dimReadout=[1],
+    # Here we need the adjacency matrix from way above!
+    GSO=torch.from_numpy(Wnorm).to(device).float(),
+)
+gnn_model.to(device)
+
+(trained_gnn_model, train_loss_gnn, val_loss_gnn) = train_model(
+    gnn_model, train_data, val_data, n_epochs=3
+)
+
+# %%
+print(f"train_loss_gnn: {train_loss_gnn}")
+print(f"val_loss_gnn: {val_loss_gnn}")
+
+# This doesn't work
+# gnn_model.save("gnn40epochs.pth")
+
+plt.rcParams.update({"text.usetex": False})
+plot_losses("GNN model", train_loss_gnn, val_loss_gnn)
 # %%
