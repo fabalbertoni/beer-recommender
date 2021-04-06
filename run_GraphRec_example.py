@@ -19,6 +19,7 @@ from math import sqrt
 import datetime
 import argparse
 import os
+import matplotlib.pyplot as plt
 
 """
 GraphRec: Graph Neural Networks for Social Recommendation.
@@ -87,6 +88,7 @@ class GraphRec(nn.Module):
 def train(model, device, train_loader, optimizer, epoch, best_rmse, best_mae):
     model.train()
     running_loss = 0.0
+    loss_values = []
     for i, data in enumerate(train_loader, 0):
         batch_nodes_u, batch_nodes_v, labels_list = data
         # TODO: Not sure why we end up with shape (batch_size, 1, 5).
@@ -97,11 +99,14 @@ def train(model, device, train_loader, optimizer, epoch, best_rmse, best_mae):
         loss.backward(retain_graph=True)
         optimizer.step()
         running_loss += loss.item()
-        if i % 100 == 0:
+        if i % 1000 == 0 and i > 0:
             print('[%d, %5d] loss: %.3f, The best rmse/mae: %.6f / %.6f' % (
-                epoch, i, running_loss / 100, best_rmse, best_mae))
-            running_loss = 0.0
-    return 0
+                epoch, i, running_loss / (1000 * i), best_rmse, best_mae))
+            # running_loss = 0.0
+
+    loss_values.append(running_loss / len(train_loader))
+
+    return loss_values
 
 
 def test(model, device, test_loader):
@@ -114,23 +119,25 @@ def test(model, device, test_loader):
             val_output = model.forward(test_u, test_v)
             tmp_pred.append(list(val_output.data.cpu().numpy()))
             target.append(list(tmp_target.data.cpu().numpy()))
+
     tmp_pred = np.array(sum(tmp_pred, []))
     target = np.array(sum(target, []))
-    expected_rmse = sqrt(mean_squared_error(tmp_pred, target))
-    import pdb; pdb.set_trace()
-    mae = mean_absolute_error(tmp_pred, target)
-    return expected_rmse, mae
+    # TODO: Same as above, not sure we we have an extra dim.
+    target = np.squeeze(target)
+    expected_rmses = [sqrt(mean_squared_error(tmp_pred[:, i], target[:, i])) for i in range(target.shape[1])]
+    maes = [mean_absolute_error(tmp_pred[:, i], target[:, i]) for i in range(target.shape[1])]
+    return expected_rmses, maes
 
 
-def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epochs=100):
+def run(data, batch_size=128, embed_dim=64, r_hidden_dim=256, lr=0.001, test_batch_size=1000, epochs=100, use_similarity=False, gpu='0'):
 
-    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+    os.environ['CUDA_VISIBLE_DEVICES'] = gpu
     use_cuda = False
     if torch.cuda.is_available():
         use_cuda = True
     device = torch.device("cuda" if use_cuda else "cpu")
 
-    history_u_lists, history_ur_lists, history_v_lists, history_vr_lists, train_u, train_v, train_r, test_u, test_v, test_r, social_adj_lists = data
+    history_u_lists, history_ur_lists, history_v_lists, history_vr_lists, train_u, train_v, train_r, val_u, val_v, val_r, test_u, test_v, test_r, item_adj_lists = data
     """
     ## toy dataset
     history_u_lists, history_ur_lists:  user's purchased history (item set in training set), and his/her rating score (dict)
@@ -149,14 +156,15 @@ def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epoc
 
     trainset = torch.utils.data.TensorDataset(torch.LongTensor(train_u), torch.LongTensor(train_v),
                                               torch.FloatTensor(train_r))
+    valset = torch.utils.data.TensorDataset(torch.LongTensor(val_u), torch.LongTensor(val_v),
+                                            torch.FloatTensor(val_r))
     testset = torch.utils.data.TensorDataset(torch.LongTensor(test_u), torch.LongTensor(test_v),
                                              torch.FloatTensor(test_r))
     train_loader = torch.utils.data.DataLoader(trainset, batch_size=batch_size, shuffle=True)
+    val_loader = torch.utils.data.DataLoader(valset, batch_size=test_batch_size, shuffle=True)
     test_loader = torch.utils.data.DataLoader(testset, batch_size=test_batch_size, shuffle=True)
     num_users = history_u_lists.__len__()
-    print(num_users)
     num_items = history_v_lists.__len__()
-    print(num_items)
     # Not used for now
     # num_ratings = ratings_list.__len__()
 
@@ -165,10 +173,10 @@ def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epoc
 
     # Instead of using 9 embeddings, use a FC to compute the embedding given 5 review values.
     r2e = nn.Sequential(
-        nn.Linear(5, 200),
+        nn.Linear(5, r_hidden_dim),
         nn.ReLU(),
-        nn.Linear(200, embed_dim),
-    )
+        nn.Linear(r_hidden_dim, embed_dim),
+    ).to(device)
 
     # user feature
     # features: item * rating
@@ -185,25 +193,56 @@ def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epoc
     enc_v_history = UV_Encoder(v2e, embed_dim, history_v_lists, history_vr_lists, agg_v_history, cuda=device, uv=False)
 
     # we do have item similarity data so we will add this piece and see if it works
-    # TODO: Add item adjancency
+    # item adjancency
+    # TODO Use item similarity later (enc_v).
+    agg_v_similarity = Social_Aggregator(lambda nodes: enc_v_history(nodes).t(), v2e, embed_dim, cuda=device)
+    enc_v = Social_Encoder(lambda nodes: enc_v_history(nodes).t(), embed_dim, item_adj_lists, agg_v_similarity,
+                           base_model=enc_v_history, cuda=device)
 
     # model
-    graphrec = GraphRec(enc_u_history, enc_v_history, r2e).to(device)
+    if use_similarity:
+        graphrec = GraphRec(enc_u_history, enc_v, r2e).to(device)
+    else:
+        graphrec = GraphRec(enc_u_history, enc_v_history, r2e).to(device)
     optimizer = torch.optim.RMSprop(graphrec.parameters(), lr=lr, alpha=0.9)
 
     best_rmse = 9999.0
+    train_rmse_history = {}
+    val_rmse_history = {}
+
     best_mae = 9999.0
+    train_mae_history = {}
+    val_mae_history = {}
     endure_count = 0
+    fields = ['overall', 'review_aroma', 'review_appearance', 'review_palate', 'review_taste']
+    loss_history = []
 
     for epoch in range(1, epochs + 1):
 
-        train(graphrec, device, train_loader, optimizer, epoch, best_rmse, best_mae)
-        expected_rmse, mae = test(graphrec, device, test_loader)
-        # please add the validation set to tune the hyper-parameters based on your datasets.
+        loss_values = train(graphrec, device, train_loader, optimizer, epoch, best_rmse, best_mae)
+        loss_history.extend(loss_values)
 
-        print(expected_rmse)
-        print(mae)
+        # Metrics
+        train_expected_rmses, train_maes = test(graphrec, device, train_loader)
+        for idx, (expected_rmse, mae) in enumerate(zip(train_expected_rmses, train_maes)):
+            train_rmse_history.setdefault(fields[idx], []).append(expected_rmse)
+            train_mae_history.setdefault(fields[idx], []).append(mae)
 
+            print(f'TRAIN metrics for field {fields[idx]}:')
+            print(expected_rmse)
+            print(mae)
+
+        val_expected_rmses, val_maes = test(graphrec, device, val_loader)
+        for idx, (expected_rmse, mae) in enumerate(zip(val_expected_rmses, val_maes)):
+            val_rmse_history.setdefault(fields[idx], []).append(expected_rmse)
+            val_mae_history.setdefault(fields[idx], []).append(mae)
+
+            print(f'VALIDATION metrics for field {fields[idx]}:')
+            print(expected_rmse)
+            print(mae)
+
+        expected_rmse = val_expected_rmses[0]
+        mae = val_maes[0]
         # early stopping (no validation set in toy dataset)
         if best_rmse > expected_rmse:
             best_rmse = expected_rmse
@@ -211,11 +250,27 @@ def run(data, batch_size=128, embed_dim=64, lr=0.001, test_batch_size=1000, epoc
             endure_count = 0
         else:
             endure_count += 1
-        print("rmse: %.4f, mae:%.4f " % (expected_rmse, mae))
+        print("val rmse: %.4f, val mae:%.4f " % (expected_rmse, mae))
 
         if endure_count > 5:
             break
 
+    plt.title("Loss history")
+    plt.plot(loss_history, label='Train Loss')
+    plt.legend()
+    plt.show()
 
-# if __name__ == "__main__":
-#     main()
+    for field in fields:
+        plt.title(f"Metrics for {field}")
+        plt.plot(train_rmse_history[field], label='TRAIN RMSE')
+        plt.plot(train_mae_history[field], label='TRAIN MAE')
+        plt.plot(val_rmse_history[field], label='VAL RMSE')
+        plt.plot(val_mae_history[field], label='VAL MAE')
+        plt.legend()
+        plt.show()
+
+    expected_rmses, maes = test(graphrec, device, test_loader)
+    for idx, (expected_rmse, mae) in enumerate(zip(expected_rmses, maes)):
+        print(f'TEST metrics for field {fields[idx]}:')
+        print(expected_rmse)
+        print(mae)
